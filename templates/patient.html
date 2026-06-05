@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>تشخیص آنلاین | MediSync</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: linear-gradient(135deg, #0d1b2a, #1b263b);
+            font-family: 'Tahoma', 'Segoe UI', sans-serif;
+            color: #e0e0e0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 700px;
+            width: 100%;
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            border: 1px solid rgba(0,255,0,0.1);
+        }
+        .icon { text-align: center; font-size: 50px; margin-bottom: 10px; }
+        h1 { text-align: center; color: #4cff8d; margin-bottom: 5px; font-size: 28px; }
+        .subtitle { text-align: center; color: #aaa; margin-bottom: 25px; font-size: 14px; }
+        label { display: block; margin-bottom: 8px; color: #4cff8d; font-weight: bold; }
+        .input-row { display: flex; gap: 10px; align-items: flex-end; }
+        textarea {
+            flex: 1;
+            height: 120px;
+            background: #121b26;
+            border: 1px solid #2c3e50;
+            border-radius: 10px;
+            padding: 15px;
+            color: #e0f0e0;
+            font-size: 16px;
+            resize: vertical;
+            outline: none;
+            transition: border 0.3s;
+        }
+        textarea:focus { border-color: #4cff8d; }
+        .mic-btn {
+            background: #4cff8d;
+            border: none;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            font-size: 24px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .mic-btn.recording {
+            background: #ff4c4c;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(255,76,76,0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(255,76,76,0); }
+            100% { box-shadow: 0 0 0 0 rgba(255,76,76,0); }
+        }
+        button {
+            margin-top: 15px;
+            width: 100%;
+            padding: 14px;
+            background: #4cff8d;
+            color: #0a0a0a;
+            border: none;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s, transform 0.1s;
+        }
+        button:hover { background: #3adb76; }
+        button:active { transform: scale(0.98); }
+        #result {
+            margin-top: 25px;
+            padding: 20px;
+            border-radius: 12px;
+            display: none;
+            animation: fadeIn 0.5s;
+        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .urgency-low { background: rgba(0,255,0,0.1); border: 1px solid #4cff8d; }
+        .urgency-medium { background: rgba(255,165,0,0.1); border: 1px solid #ffa500; }
+        .urgency-high { background: rgba(255,0,0,0.15); border: 1px solid #ff4c4c; }
+        .error { background: rgba(255,0,0,0.1); border: 1px solid #ff4c4c; }
+        .disease-name { font-size: 22px; font-weight: bold; margin-bottom: 10px; }
+        .detail-label { color: #4cff8d; font-weight: bold; }
+        .disclaimer { margin-top: 20px; font-size: 12px; color: #888; text-align: center; }
+        .status-text { font-size: 12px; color: #aaa; margin-top: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">🏥</div>
+        <h1>MediSync دستیار سلامت</h1>
+        <p class="subtitle">علائم خود را به فارسی توضیح دهید یا از دکمهٔ میکروفن استفاده کنید</p>
+
+        <label for="symptomsInput"
+
+>📝 علائم شما:</label>
+        <div class="input-row">
+            <textarea id="symptomsInput" placeholder="مثال: از دیروز سردرد شدید و حالت تهوع دارم..."></textarea>
+            <button class="mic-btn" id="micBtn" onclick="toggleMic()" title="گوش دادن">🎤</button>
+        </div>
+        <div class="status-text" id="statusText"></div>
+
+        <button onclick="getDiagnosis()">🔍 تشخیص بده</button>
+
+        <div id="result"></div>
+        <div class="disclaimer">⚠️ این ابزار جایگزین پزشک نیست و فقط برای آگاهی اولیه طراحی شده است.</div>
+    </div>
+
+    <script>
+        // ----- منطق میکروفن -----
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition;
+        let isRecording = false;
+
+        if (!SpeechRecognition) {
+            document.getElementById('micBtn').style.display = 'none';
+            document.getElementById('statusText').textContent = '⚠️ مرورگر شما از تشخیص گفتار پشتیبانی نمی‌کند.';
+        } else {
+            recognition = new SpeechRecognition();
+            recognition.lang = 'fa-IR';
+            recognition.interimResults = false;
+            recognition.continuous = false;
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                const textarea = document.getElementById('symptomsInput');
+                textarea.value += (textarea.value ? ' ' : '') + transcript;
+                document.getElementById('statusText').textContent = '✅ متن گفتار اضافه شد.';
+            };
+
+            recognition.onerror = (event) => {
+                document.getElementById('statusText').textContent = '❌ خطا در تشخیص صدا: ' + event.error;
+                stopMicUI();
+            };
+
+            recognition.onend = () => {
+                stopMicUI();
+            };
+        }
+
+        function toggleMic() {
+            if (!recognition) return;
+            if (isRecording) {
+                recognition.stop();
+                stopMicUI();
+            } else {
+                recognition.start();
+                startMicUI();
+                document.getElementById('statusText').textContent = '🎙️ در حال گوش دادن... لطفاً علائم خود را بگویید.';
+            }
+        }
+
+        function startMicUI() {
+            isRecording = true;
+            document.getElementById('micBtn').classList.add('recording');
+        }
+
+        function stopMicUI() {
+            isRecording = false;
+            document.getElementById('micBtn').classList.remove('recording');
+        }
+
+        // ----- منطق تشخیص -----
+        async function getDiagnosis() {
+            const text = document.getElementById('symptomsInput').value.trim();
+            const resultDiv = document.getElementById('result');
+            if (!text) {
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'error';
+                resultDiv.innerHTML = '<span class="detail-label">❌ لطفاً علائم خود را وارد کنید.</span>';
+                return;
+            }
+
+            resultDiv.style.display = 'block';
+            resultDiv.className = '';
+            resultDiv.innerHTML = '<div style="text-align:center; color:#4cff8d;">⏳ در حال بررسی...</div>';
+
+            try {
+                const response = await fetch('/api/patient_diagnose', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symptoms: text })
+                });
+                const data = await response.json();
+
+                if (data.error) {
+                    resultDiv.className = 'error';
+                    resultDiv.innerHTML = `<span class="detail-label">❌ ${data.error}</span>`;
+                } else {
+                    let urgencyClass = '';
+                    if (data.urgency === 'کم') urgencyClass = 'urgency-low';
+                    else if (data.urgency === 'متوسط') urgencyClass = 'urgency-medium';
+                    else urgencyClass = 'urgency-high';
+
+                    resultDiv.className = urgencyCla
+
+ss;
+                    resultDiv.innerHTML = `
+                        <div class="disease-name">🩺 ${data.name}</div>
+                        <p><span class="detail-label">📖 شرح:</span> ${data.description || 'نامشخص'}</p>
+                        <p><span class="detail-label">💊 درمان اولیه:</span> ${data.treatment || 'نامشخص'}</p>
+                        <p><span class="detail-label">🚨 سطح اورژانس:</span> ${data.urgency}</p>
+                        <p><span class="detail-label">🔍 علائم شناسایی‌شده:</span> ${data.symptoms_found.join('، ')}</p>
+                        <p style="margin-top:10px; font-size:13px; color:#ccc;">تعداد تطابق: ${data.matched} علامت</p>
+                    `;
+                }
+            } catch (err) {
+                resultDiv.className = 'error';
+                resultDiv.innerHTML = '<span class="detail-label">❌ خطا در برقراری ارتباط با سرور.</span>';
+            }
+        }
+    </script>
+</body>
+</html>
