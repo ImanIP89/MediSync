@@ -1,23 +1,23 @@
-from flask import Flask, render_template, jsonify, request, session
+from flask import Flask, render_template, jsonify, request, session, redirect, url_for
 import sqlite3
 import openai
+from functools import wraps
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.secret_key = 'medisync-secret-key-change-in-production'
+app.secret_key = 'medisync-ultra-secret-key-change-me'
 
 # ---------- پیکربندی DeepSeek ----------
-DEEPSEEK_API_KEY = "sk-215d3b60ca584440ac081399b905f462"  # 🔑 کلید خود را جایگزین کن
+DEEPSEEK_API_KEY = "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # 🔑 کلید خود را جایگزین کن
 
 # ---------- توابع کمکی ----------
 def get_db():
-    """اتصال به دیتابیس SQLite با پشتیبانی از دسترسی هم‌زمان چند کاربر"""
     conn = sqlite3.connect('medisync.db', check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute('PRAGMA journal_mode=WAL')
     return conn
 
 def ask_deepseek(question):
-    """ارسال سوال به DeepSeek و دریافت پاسخ"""
     openai.api_key = DEEPSEEK_API_KEY
     openai.api_base = "https://api.deepseek.com/v1"
     prompt = f"""تو یک دستیار پزشکی هوشمند و مهربان هستی که به زبان فارسی و روان صحبت می‌کنی.
@@ -42,7 +42,6 @@ def ask_deepseek(question):
         return f"❌ خطا در ارتباط با DeepSeek: {str(e)}"
 
 def translate_text(text, target_lang='English'):
-    """ترجمه متن با DeepSeek"""
     prompt = f"""Translate the following Persian medical text to {target_lang}.
 If the text is not medical, still translate it accurately and naturally.
 Text: {text}
@@ -64,13 +63,34 @@ Translation:"""
         return f"❌ Translation error: {str(e)}"
 
 def get_disease_symptoms(disease_id):
-    """برگرداندن لیست علائم یک بیماری مشخص"""
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute('SELECT s.name FROM disease_symptoms ds JOIN symptoms s ON ds.symptom_id = s.id WHERE ds.disease_id = ?', (disease_id,))
+    cursor.execute(
+        'SELECT s.name FROM disease_symptoms ds JOIN symptoms s ON ds.symptom_id = s.id WHERE ds.disease_id = ?',
+        (disease_id,)
+    )
     syms = [row['name'] for row in cursor.fetchall()]
     conn.close()
     return syms
+
+# ---------- احراز هویت ----------
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def role_required(*roles):
+    def wrapper(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if 'user_role' not in session or session['user_role'] not in roles:
+                return "🚫 دسترسی غیرمجاز", 403
+            return f(*args, **kwargs)
+        return decorated_function
+    return wrapper
 
 # ---------- مسیرهای صفحات ----------
 @app.route('/')
@@ -78,20 +98,104 @@ def welcome():
     return render_template('welcome.html')
 
 @app.route('/terminal')
+@login_required
+@role_required('doctor', 'admin')
 def terminal():
     return render_template('terminal.html')
 
 @app.route('/patient')
+@login_required
 def patient_form():
     return render_template('patient.html')
 
 @app.route('/translate')
+@login_required
+@role_required('doctor', 'admin', 'patient')
 def translate_page():
     return render_template('translate.html')
 
 @app.route('/bulk')
+@login_required
+@role_required('admin')
 def bulk_page():
     return render_template('bulk.html')
+
+# ---------- پروفایل ----------
+@app.route('/profile', methods=['GET', 'POST'])
+@login_required
+def profile():
+    conn = get_db()
+    cursor = conn.cursor()
+    if request.method == 'POST':
+        first_name = request.form['first_name'].strip()
+        last_name = request.form['last_name'].strip()
+        national_id = request.form['national_id'].strip()
+        phone = request.form['phone'].strip()
+        medical_history = request.form['medical_history'].strip()
+        medications = request.form['medications'].strip()
+        cursor.execute('''
+            INSERT INTO user_profiles (user_id, first_name, last_name, national_id, phone, medical_history, medications)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                first_name=excluded.first_name,
+                last_name=excluded.last_name,
+                national_id=excluded.national_id,
+                phone=excluded.phone,
+                medical_history=excluded.medical_history,
+                medications=excluded.medications
+        ''', (session['user_id'], first_name, last_name, national_id, phone, medical_history, medications))
+        conn.commit()
+        conn.close()
+        return redirect(url_for('profile'))
+    # GET
+    cursor.execute('SELECT * FROM user_profiles WHERE user_id = ?', (session['user_id'],))
+    profile_data = cursor.fetchone()
+    conn.close()
+    return render_template('profile.html', profile=profile_data)
+
+# ---------- ورود، ثبت‌نام، خروج ----------
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username'].strip()
+        password = request.form['password']
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, password_hash, role, full_name FROM users WHERE username = ?', (username,))
+        user = cursor.fetchone()
+        conn.close()
+        if user and check_password_hash(user['password_hash'], password):
+            session['user_id'] = user['id']
+            session['username'] = username
+            session['user_role'] = user['role']
+            session['full_name'] = user['full_name']
+            return redirect(url_for('welcome'))
+        return render_template('login.html', error='نام کاربری یا رمز عبور نادرست است.')
+    return render_template('login.html')
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        username = request.form['username'].strip()
+        password = request.form['password']
+        full_name = request.form.get('full_name', '').strip()
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM users WHERE username = ?', (username,))
+        if cursor.fetchone():
+            conn.close()
+            return render_template('register.html', error='این نام کاربری قبلاً استفاده شده است.')
+        cursor.execute('INSERT INTO users (username, password_hash, role, full_name) VALUES (?, ?, ?, ?)',
+                       (username, generate_password_hash(password), 'patient', full_name))
+        conn.commit()
+        conn.close()
+        return redirect(url_for('login'))
+    return render_template('register.html')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('welcome'))
 
 # ---------- API: دریافت لیست بیماری‌ها ----------
 @app.route('/api/diseases')
@@ -121,13 +225,15 @@ def api_diseases():
 
 # ---------- API: اجرای دستورات ترمینال ----------
 @app.route('/api/command', methods=['POST'])
+@login_required
+@role_required('doctor', 'admin')
 def api_command():
     data = request.get_json()
     cmd = data.get('cmd', '').strip()
     cmd_lower = cmd.lower()
     response = {"output": ""}
 
-    if cmd_lower == 'check' or cmd_lower == 'show':
+    if cmd_lower in ('check', 'show'):
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute('''
@@ -170,7 +276,7 @@ def api_command():
                 cursor = conn.cursor()
                 placeholders = ','.join('?' * len(symptoms_list))
                 query = f'''
-                    SELECT d.name, d.description, d.treatment, d.urgency, COUNT() as matched_count
+                    SELECT d.name, d.description, d.treatment, d.urgency, COUNT(*) as matched_count
                     FROM diseases d
                     JOIN disease_symptoms ds ON d.id = ds.disease_id
                     JOIN symptoms s ON ds.symptom_id = s.id
@@ -197,14 +303,13 @@ def api_command():
         parts = params.split()
         for part in parts:
             if ':' in part:
-                key, val = part.split(
-
-':', 1)
+                key, val = part.split(':', 1)
                 key = key.lower()
                 if key in fields:
                     fields[key] = val.strip()
         if not fields['name'] or not fields['sym']:
-            response["output"] = "❌ حداقل name و sym الزامی است.\nفرمت: add name:نام_بیماری sym:علامت۱,علامت۲ urgency:کم/متوسط/بالا desc:توضیح treat:درمان"
+            response["output"] = ("❌ حداقل name و sym الزامی است.\n"
+                                  "فرمت: add name:نام_بیماری sym:علامت۱,علامت۲ urgency:کم/متوسط/بالا desc:توضیح treat:درمان")
         else:
             conn = get_db()
             cursor = conn.cursor()
@@ -254,16 +359,38 @@ def api_command():
                 translation = translate_text(text_part, 'English')
                 response["output"] = f"🌐 ترجمه به انگلیسی:\n{translation}"
 
+    elif cmd_lower.startswith('delete'):
+        parts = cmd.split(' ', 1)
+        if len(parts) < 2:
+            response["output"] = "❌ نحوه استفاده: delete <نام دقیق بیماری>"
+        else:
+            name_to_delete = parts[1].strip()
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute('SELECT id FROM diseases WHERE name = ?', (name_to_delete,))
+            row = cursor.fetchone()
+            if not row:
+                response["output"] = f"❌ بیماری با نام '{name_to_delete}' پیدا نشد."
+            else:
+                disease_id = row[0]
+                cursor.execute('DELETE FROM disease_symptoms WHERE disease_id = ?', (disease_id,))
+                cursor.execute('DELETE FROM diseases WHERE id = ?', (disease_id,))
+                conn.commit()
+                conn.close()
+                response["output"] = f"✅ بیماری '{name_to_delete}' با موفقیت حذف شد."
+
     elif cmd_lower.startswith('guided'):
-        response["output"] = "⚡ تشخیص گام‌به‌گام فقط از طریق فرم بیمار (Patient Form) در دسترس است. لطفاً از آنجا استفاده کنید."
+        response["output"] = ("⚡ تشخیص گام‌به‌گام فعلاً فقط از طریق فرم بیمار (Patient Form) در دسترس است."
+                              " لطفاً از آنجا استفاده کنید.")
 
     else:
-        response["output"] = "❌ دستور نامعتبر. دستورات: check, diagnose, add, ask, translate, guided"
+        response["output"] = "❌ دستور نامعتبر. دستورات: check, diagnose, add, ask, translate, delete, guided"
 
     return jsonify(response)
 
-# ---------- API: تشخیص بیمار (فرم) ----------
+# ---------- API: تشخیص بیمار (فرم) – نسخه چندبیماری ----------
 @app.route('/api/patient_diagnose', methods=['POST'])
+@login_required
 def patient_diagnose():
     data = request.get_json()
     raw_text = data.get('symptoms', '').strip()
@@ -284,34 +411,37 @@ def patient_diagnose():
     cursor = conn.cursor()
     placeholders = ','.join('?' * len(found_symptoms))
     query = f'''
-        SELECT d.name, d.description, d.treatment, d.urgency, COUNT() as matched_count
+        SELECT d.name, d.description, d.treatment, d.urgency, COUNT(*) as matched_count
         FROM diseases d
         JOIN disease_symptoms ds ON d.id = ds.disease_id
         JOIN symptoms s ON ds.symptom_id = s.id
         WHERE s.name IN ({placeholders})
         GROUP BY d.id
         ORDER BY matched_count DESC
-        LIMIT 1
+        LIMIT 5
     '''
     cursor.execute(query, found_symptoms)
-    row = cursor.fetchone()
+    rows = cursor.fetchall()
     conn.close()
 
-    if row:
-        result = {
+    if not rows:
+        return jsonify({"error": "بیماری منطبق با علائم شما یافت نشد. لطفاً با پزشک مشورت کنید."})
+
+    candidates = []
+    for row in rows:
+        candidates.append({
             "name": row["name"],
             "description": row["description"],
             "treatment": row["treatment"],
             "urgency": row["urgency"],
-            "matched": row["matched_count"],
-            "symptoms_found": found_symptoms
-        }
-        return jsonify(result)
-    else:
-        return jsonify({"error": "بیماری منطبق با علائم شما یافت نشد. لطفاً با پزشک مشورت کنید."})
+            "matched": row["matched_count"]
+        })
+    return jsonify({"candidates": candidates, "symptoms_found": found_symptoms})
 
 # ---------- API: افزودن گروهی بیماری‌ها ----------
 @app.route('/api/bulk_add', methods=['POST'])
+@login_required
+@role_required('admin')
 def api_bulk_add():
     data = request.get_json()
     diseases = data.get('diseases', [])
@@ -321,11 +451,11 @@ def api_bulk_add():
     cursor = conn.cursor()
     added = 0
     for d in diseases:
-        name = d.get('name','').strip()
-        urgency = d.get('urgency','کم').strip()
-        desc = d.get('description','').strip()
-        treat = d.get('treatment','').strip()
-        symptoms_str = d.get('symptoms','').strip()
+        name = d.get('name', '').strip()
+        urgency = d.get('urgency', 'کم').strip()
+        desc = d.get('description', '').strip()
+        treat = d.get('treatment', '').strip()
+        symptoms_str = d.get('symptoms', '').strip()
         if not name or not symptoms_str:
             continue
         cursor.execute('INSERT INTO diseases (name, description, treatment, urgency) VALUES (?,?,?,?)',
@@ -354,7 +484,7 @@ def api_translate():
     translation = translate_text(text, target)
     return jsonify({"translation": translation})
 
-# ---------- API: پرسش از هوش مصنوعی (در صورت نیاز جداگانه) ----------
+# ---------- API: پرسش از هوش مصنوعی ----------
 @app.route('/api/ai_ask', methods=['POST'])
 def ai_ask():
     data = request.get_json()
@@ -365,6 +495,4 @@ def ai_ask():
     return jsonify({"answer": answer})
 
 if __name__ == '__main__':
-    # host='0.0.0.0' باعث می‌شود همه‌ی دستگاه‌های شبکه بتوانند متصل شوند
-    # threaded=True برای پشتیبانی از چند کاربر هم‌زمان ضروری است
     app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)

@@ -63,10 +63,22 @@
         <div class="logo">🩺 MediSync</div>
         <ul class="nav-links">
             <li><a href="/">🏠 خانه</a></li>
-            <li><a href="/terminal">💻 ترمینال</a></li>
-            <li><a href="/patient">👤 بیمار</a></li>
-            <li><a href="/translate">🌐 ترجمه</a></li>
-            <li><a href="/bulk">📥 افزودن گروهی</a></li>
+            {% if session.user_id %}
+                {% if session.user_role in ('doctor', 'admin') %}
+                    <li><a href="/terminal">💻 ترمینال</a></li>
+                {% endif %}
+                <li><a href="/patient">👤 بیمار</a></li>
+                <li><a href="/translate">🌐 ترجمه</a></li>
+                {% if session.user_role == 'admin' %}
+                    <li><a href="/bulk">📥 افزودن گروهی</a></li>
+                {% endif %}
+                <li><a href="/profile">👤 پروفایل</a></li>
+                <li><span style="color:#4cff8d;">{{ session.full_name or session.username }}</span></li>
+                <li><a href="/logout">🚪 خروج</a></li>
+            {% else %}
+                <li><a href="/login">🔑 ورود</a></li>
+                <li><a href="/register">📝 ثبت‌نام</a></li>
+            {% endif %}
         </ul>
     </nav>
 
@@ -78,6 +90,7 @@
         </p>
 
         <div class="feature-cards">
+            {% if session.user_role in ('doctor', 'admin') %}
             <a href="/terminal">
                 <div class="card">
                     <div class="emoji">💻</div>
@@ -85,6 +98,7 @@
                     <p>کنترل کامل با دستورات CMD و جستجوی هوشمند</p>
                 </div>
             </a>
+            {% endif %}
             <a href="/patient">
                 <div class="card">
                     <div class="emoji">👤</div>
@@ -99,14 +113,15 @@
                     <p>ترجمه چندزبانه علائم و پاسخ‌ها</p>
                 </div>
             </a>
+            {% if session.user_role == 'admin' %}
             <a href="/bulk">
                 <div class="card">
                     <div class="emoji">📚</div>
                     <h3>افزودن دانش</h3>
                     <p>تا ۱۰۰۰ بیماری رو یکباره وارد کن</p>
-
-</div>
+                </div>
             </a>
+            {% endif %}
         </div>
     </div>
 

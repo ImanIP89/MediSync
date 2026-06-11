@@ -22,10 +22,16 @@
         <span style="color:#4cff8d; font-weight:bold;">🩺 MediSync</span>
         <div>
             <a href="/">🏠 خانه</a>
-            <a href="/terminal">💻 ترمینال</a>
+            {% if session.user_role in ('doctor', 'admin') %}
+                <a href="/terminal">💻 ترمینال</a>
+            {% endif %}
             <a href="/patient">👤 بیمار</a>
             <a href="/translate" style="color:#4cff8d;">🌐 ترجمه</a>
-            <a href="/bulk">📥 افزودن گروهی</a>
+            {% if session.user_role == 'admin' %}
+                <a href="/bulk">📥 افزودن گروهی</a>
+            {% endif %}
+            <a href="/profile">👤 پروفایل</a>
+            <a href="/logout">🚪 خروج</a>
         </div>
     </nav>
     <div class="container">

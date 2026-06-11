@@ -109,7 +109,7 @@
         addLog('Microsoft Windows [Version 10.0.19045.3693]');
         addLog('(c) MediSync Healthcare Shell. All rights reserved.');
         addLog('');
-        addLog('دستورات: check, diagnose, add, ask, translate');
+        addLog('دستورات: check, diagnose, add, ask, translate, delete');
         addLog('برای شروع، check را تایپ کنید.');
         addLog('');
 
@@ -121,7 +121,17 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ cmd: cmd })
                 });
-                const data = await response.json();
+
+                const rawText = await response.text();
+                let data;
+                try {
+                    data = JSON.parse(rawText);
+                } catch (e) {
+                    addLog(`❌ پاسخ JSON معتبر نیست: ${rawText}`);
+                    addLog('');
+                    return;
+                }
+
                 const lines = data.output.split('\n');
                 lines.forEach(line => {
                     if (line.trim() !== '') {
@@ -130,7 +140,7 @@
                     }
                 });
             } catch (error) {
-                addLog('❌ خطا در برقراری ارتباط با سرور.');
+                addLog(`❌ خطای fetch: ${error.message}`);
             }
             addLog('');
             cmdInput.value = '';

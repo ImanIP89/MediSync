@@ -98,6 +98,9 @@
         .detail-label { color: #4cff8d; font-weight: bold; }
         .disclaimer { margin-top: 20px; font-size: 12px; color: #888; text-align: center; }
         .status-text { font-size: 12px; color: #aaa; margin-top: 5px; }
+        .nav-links { display: flex; gap: 15px; margin-bottom: 20px; justify-content: center; }
+        .nav-links a { color: #ccc; text-decoration: none; }
+        .nav-links a:hover { color: #4cff8d; }
     </style>
 </head>
 <body>
@@ -105,10 +108,8 @@
         <div class="icon">🏥</div>
         <h1>MediSync دستیار سلامت</h1>
         <p class="subtitle">علائم خود را به فارسی توضیح دهید یا از دکمهٔ میکروفن استفاده کنید</p>
-
-        <label for="symptomsInput"
-
->📝 علائم شما:</label>
+        
+        <label for="symptomsInput">📝 علائم شما:</label>
         <div class="input-row">
             <textarea id="symptomsInput" placeholder="مثال: از دیروز سردرد شدید و حالت تهوع دارم..."></textarea>
             <button class="mic-btn" id="micBtn" onclick="toggleMic()" title="گوش دادن">🎤</button>
@@ -175,7 +176,7 @@
             document.getElementById('micBtn').classList.remove('recording');
         }
 
-        // ----- منطق تشخیص -----
+        // ----- منطق تشخیص (چندبیماری) -----
         async function getDiagnosis() {
             const text = document.getElementById('symptomsInput').value.trim();
             const resultDiv = document.getElementById('result');
@@ -202,22 +203,22 @@
                     resultDiv.className = 'error';
                     resultDiv.innerHTML = `<span class="detail-label">❌ ${data.error}</span>`;
                 } else {
-                    let urgencyClass = '';
-                    if (data.urgency === 'کم') urgencyClass = 'urgency-low';
-                    else if (data.urgency === 'متوسط') urgencyClass = 'urgency-medium';
-                    else urgencyClass = 'urgency-high';
-
-                    resultDiv.className = urgencyCla
-
-ss;
-                    resultDiv.innerHTML = `
-                        <div class="disease-name">🩺 ${data.name}</div>
-                        <p><span class="detail-label">📖 شرح:</span> ${data.description || 'نامشخص'}</p>
-                        <p><span class="detail-label">💊 درمان اولیه:</span> ${data.treatment || 'نامشخص'}</p>
-                        <p><span class="detail-label">🚨 سطح اورژانس:</span> ${data.urgency}</p>
-                        <p><span class="detail-label">🔍 علائم شناسایی‌شده:</span> ${data.symptoms_found.join('، ')}</p>
-                        <p style="margin-top:10px; font-size:13px; color:#ccc;">تعداد تطابق: ${data.matched} علامت</p>
-                    `;
+                    const candidates = data.candidates;
+                    let html = `<p style="color:#4cff8d;">🔍 علائم شناسایی‌شده: ${data.symptoms_found.join('، ')}</p>`;
+                    html += '<h3>تشخیص‌های محتمل:</h3>';
+                    candidates.forEach((c, index) => {
+                        let urgencyClass = '';
+                        if (c.urgency === 'کم') urgencyClass = 'urgency-low';
+                        else if (c.urgency === 'متوسط') urgencyClass = 'urgency-medium';
+                        else if (c.urgency === 'بالا') urgencyClass = 'urgency-high';
+                        html += `<div class="${urgencyClass}" style="margin-bottom:15px; padding:15px; border-radius:10px;">
+                            <div class="disease-name">🩺 ${index+1}. ${c.name} (تطابق ${c.matched} علامت)</div>
+                            <p><span class="detail-label">📖 شرح:</span> ${c.description || 'نامشخص'}</p>
+                            <p><span class="detail-label">💊 درمان اولیه:</span> ${c.treatment || 'نامشخص'}</p>
+                            <p><span class="detail-label">🚨 سطح اورژانس:</span> ${c.urgency}</p>
+                        </div>`;
+                    });
+                    resultDiv.innerHTML = html;
                 }
             } catch (err) {
                 resultDiv.className = 'error';
